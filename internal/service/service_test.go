@@ -126,6 +126,44 @@ func TestEndToEndAlignAndFreeze(t *testing.T) {
 	}
 }
 
+// TestGenerateCandidatesRejectsCrossBatch 确保跨批次的词条不能用来生成候选，
+// 请求失败且不落盘任何对齐记录（候选只能来自同一批次）。
+func TestGenerateCandidatesRejectsCrossBatch(t *testing.T) {
+	svc, cleanup := newTestService(t)
+	defer cleanup()
+
+	b1, _ := svc.CreateBatch("b1", "first batch")
+	if err := svc.SetBatchStatus(b1.ID, model.BatchAligning); err != nil {
+		t.Fatal(err)
+	}
+	en1, _ := svc.AddEntry(b1.ID, "en", "bank", "金融机构/河岸")
+	s1, _ := svc.AddSense(en1.ID, "financial institution", nil)
+
+	b2, _ := svc.CreateBatch("b2", "second batch")
+	if err := svc.SetBatchStatus(b2.ID, model.BatchAligning); err != nil {
+		t.Fatal(err)
+	}
+	zh2, _ := svc.AddEntry(b2.ID, "zh", "银行/岸", "对应")
+	s2, _ := svc.AddSense(zh2.ID, "金融机构", nil)
+
+	cands, err := svc.GenerateCandidates(en1.ID, zh2.ID)
+	if err != model.ErrCrossBatch {
+		t.Fatalf("expected ErrCrossBatch, got %v (cands=%v)", err, cands)
+	}
+	if cands != nil {
+		t.Fatalf("expected no candidates on cross-batch request, got %v", cands)
+	}
+	// 两个批次都不应留有任何对齐记录。
+	if as, _ := svc.ListAlignments(b1.ID); len(as) != 0 {
+		t.Fatalf("batch1 should have no alignments, got %d", len(as))
+	}
+	if as, _ := svc.ListAlignments(b2.ID); len(as) != 0 {
+		t.Fatalf("batch2 should have no alignments, got %d", len(as))
+	}
+	_ = s1
+	_ = s2
+}
+
 func TestSplitPolysemousSense(t *testing.T) {
 	svc, cleanup := newTestService(t)
 	defer cleanup()

@@ -14,11 +14,17 @@ func (svc *Service) GenerateCandidates(entryA, entryB string) ([]model.Candidate
 	if entryA == entryB {
 		return nil, model.ErrSameEntry
 	}
-	if _, err := svc.Store.GetEntry(entryA); err != nil {
+	srcEntry, err := svc.Store.GetEntry(entryA)
+	if err != nil {
 		return nil, model.ErrUnknownEntry
 	}
-	if _, err := svc.Store.GetEntry(entryB); err != nil {
+	tgtEntry, err := svc.Store.GetEntry(entryB)
+	if err != nil {
 		return nil, model.ErrUnknownEntry
+	}
+	// 候选只能来自同一批次：跨批次配对不产出任何候选与对齐记录。
+	if srcEntry.BatchID != tgtEntry.BatchID {
+		return nil, model.ErrCrossBatch
 	}
 	cands, err := matcher.GenerateCandidates(svc.Store, entryA, entryB)
 	if err != nil {
