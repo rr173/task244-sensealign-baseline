@@ -155,6 +155,68 @@ func TestSplitPolysemousSense(t *testing.T) {
 	}
 }
 
+func TestSealedBatchRejectsAdditions(t *testing.T) {
+	svc, cleanup := newTestService(t)
+	defer cleanup()
+
+	b, err := svc.CreateBatch("t", "sealed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	en, err := svc.AddEntry(b.ID, "en", "bank", "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sn, err := svc.AddSense(en.ID, "financial institution", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 推进到终态封存。
+	for _, status := range []model.BatchStatus{
+		model.BatchAligning,
+		model.BatchPublished,
+		model.BatchSealed,
+	} {
+		if err := svc.SetBatchStatus(b.ID, status); err != nil {
+			t.Fatalf("advance to %s: %v", status, err)
+		}
+	}
+
+	// 新增义项应被拒绝。
+	if _, err := svc.AddSense(en.ID, "post-seal sense", nil); err != model.ErrBatchSealed {
+		t.Fatalf("AddSense: expected ErrBatchSealed, got %v", err)
+	}
+	// 新增例句应被拒绝。
+	if _, err := svc.AddExample(sn.ID, "post-seal example", "en", "", ""); err != model.ErrBatchSealed {
+		t.Fatalf("AddExample: expected ErrBatchSealed, got %v", err)
+	}
+	// 新增反例应被拒绝。
+	if _, err := svc.AddCounterexample(sn.ID, "post-seal counterexample", ""); err != model.ErrBatchSealed {
+		t.Fatalf("AddCounterexample: expected ErrBatchSealed, got %v", err)
+	}
+	// 新增词条仍应被拒绝。
+	if _, err := svc.AddEntry(b.ID, "zh", "银行", ""); err != model.ErrBatchSealed {
+		t.Fatalf("AddEntry: expected ErrBatchSealed, got %v", err)
+	}
+
+	// 不应留下新增记录：义项数仍为 1、例句 0、反例 0。
+	st, err := svc.BatchStats(b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Senses != 1 || st.Examples != 0 {
+		t.Fatalf("unexpected stats after rejected additions: %+v", st)
+	}
+	cxs, err := svc.ListCounterexamples(sn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cxs) != 0 {
+		t.Fatalf("expected no counterexamples, got %d", len(cxs))
+	}
+}
+
 func TestRunSelfCheckTemp(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "selfcheck.db")

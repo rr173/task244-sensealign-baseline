@@ -73,10 +73,14 @@ func (svc *Service) ListEntries(batchID string) ([]*model.Entry, error) {
 	return svc.Store.ListEntries(batchID)
 }
 
-// AddSense 在词条下新增义项，语域标签按受控词表规范化。
+// AddSense 在词条下新增义项，语域标签按受控词表规范化。批次已封存则拒绝。
 func (svc *Service) AddSense(entryID, definition string, registers []string) (*model.Sense, error) {
-	if _, err := svc.Store.GetEntry(entryID); err != nil {
+	e, err := svc.Store.GetEntry(entryID)
+	if err != nil {
 		return nil, model.ErrUnknownEntry
+	}
+	if err := svc.ensureBatchWritable(e.BatchID); err != nil {
+		return nil, err
 	}
 	tags := evidence.NormalizeRegisters(registers)
 	return svc.Store.CreateSense(entryID, definition, tags)
@@ -107,13 +111,17 @@ func (svc *Service) SetRegisters(senseID string, registers []string) error {
 	return svc.refreshAlignmentEvidence(senseID)
 }
 
-// AddExample 为义项新增例句。
+// AddExample 为义项新增例句。批次已封存则拒绝。
 func (svc *Service) AddExample(senseID, text, lang, trans, register string) (*model.Example, error) {
 	sn, err := svc.Store.GetSense(senseID)
 	if err != nil {
 		return nil, model.ErrUnknownSense
 	}
-	if _, err := svc.Store.GetEntry(sn.EntryID); err != nil {
+	e, err := svc.Store.GetEntry(sn.EntryID)
+	if err != nil {
+		return nil, err
+	}
+	if err := svc.ensureBatchWritable(e.BatchID); err != nil {
 		return nil, err
 	}
 	return svc.Store.CreateExample(senseID, text, lang, trans, register)
@@ -124,13 +132,17 @@ func (svc *Service) ListExamples(senseID string) ([]*model.Example, error) {
 	return svc.Store.ListExamples(senseID)
 }
 
-// AddCounterexample 为义项新增反例证据。
+// AddCounterexample 为义项新增反例证据。批次已封存则拒绝。
 func (svc *Service) AddCounterexample(senseID, text, note string) (*model.Counterexample, error) {
 	sn, err := svc.Store.GetSense(senseID)
 	if err != nil {
 		return nil, model.ErrUnknownSense
 	}
-	if _, err := svc.Store.GetEntry(sn.EntryID); err != nil {
+	e, err := svc.Store.GetEntry(sn.EntryID)
+	if err != nil {
+		return nil, err
+	}
+	if err := svc.ensureBatchWritable(e.BatchID); err != nil {
 		return nil, err
 	}
 	return svc.Store.CreateCounterexample(senseID, text, note)
