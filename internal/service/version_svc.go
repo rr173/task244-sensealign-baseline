@@ -42,13 +42,28 @@ func (svc *Service) FreezeVersion(versionID string) error {
 	return adjudicate.FreezeVersion(svc.Store, versionID, snap)
 }
 
-// ShareVersion 将版本标记为共享。
+// ShareVersion 将版本标记为共享。冻结版本不可变，拒绝改写。
 func (svc *Service) ShareVersion(versionID string) error {
+	v, err := svc.Store.GetVersion(versionID)
+	if err != nil {
+		return err
+	}
+	if v.Status == model.VersionFrozen {
+		return model.ErrVersionFrozen
+	}
 	return svc.Store.ShareVersion(versionID)
 }
 
-// SupersedeVersion 将版本标记为替代。
+// SupersedeVersion 将版本标记为替代。冻结版本不可变，拒绝改写，
+// 否则会令已发布的不可变快照失去冻结标记、绕过裁决写入保护。
 func (svc *Service) SupersedeVersion(versionID string) error {
+	v, err := svc.Store.GetVersion(versionID)
+	if err != nil {
+		return err
+	}
+	if v.Status == model.VersionFrozen {
+		return model.ErrVersionFrozen
+	}
 	return svc.Store.SupersedeVersion(versionID)
 }
 

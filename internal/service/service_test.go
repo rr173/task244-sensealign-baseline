@@ -117,6 +117,21 @@ func TestEndToEndAlignAndFreeze(t *testing.T) {
 		t.Fatalf("expected ErrFrozenWrite, got %v", err)
 	}
 
+	// 冻结版本不可变：不得被替代或转共享，状态保持冻结。
+	if err := svc.SupersedeVersion(v.ID); err != model.ErrVersionFrozen {
+		t.Fatalf("expected supersede of frozen to fail with ErrVersionFrozen, got %v", err)
+	}
+	if err := svc.ShareVersion(v.ID); err != model.ErrVersionFrozen {
+		t.Fatalf("expected share of frozen to fail with ErrVersionFrozen, got %v", err)
+	}
+	v3, err := svc.GetVersion(v.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v3.Status != model.VersionFrozen {
+		t.Fatalf("frozen version status mutated to %s", v3.Status)
+	}
+
 	st, err := svc.BatchStats(b.ID)
 	if err != nil {
 		t.Fatal(err)

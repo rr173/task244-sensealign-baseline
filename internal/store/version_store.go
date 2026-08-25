@@ -74,7 +74,8 @@ func (s *Store) FreezeVersion(id, snapshot string) error {
 	return nil
 }
 
-// ShareVersion 将草稿/冻结版本标记为共享（仍可变，区别于冻结）。
+// ShareVersion 将草稿版本标记为共享（仍可变，区别于冻结）。
+// 冻结版本不可变，拒绝改写（不更新任何行）。
 func (s *Store) ShareVersion(id string) error {
 	res, err := s.DB.Exec(
 		`UPDATE mapping_versions SET status=? WHERE id=? AND status<>?`,
@@ -84,21 +85,32 @@ func (s *Store) ShareVersion(id string) error {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return model.ErrNotFound
+		// 区分"不存在"与"已冻结"：先确认版本是否存在。
+		if _, err := s.GetVersion(id); err != nil {
+			return err
+		}
+		return model.ErrVersionFrozen
 	}
 	return nil
 }
 
-// SupersedeVersion 将某版本标记为替代（被新版取代）。
+// SupersedeVersion 将某版本标记为替代（被新版取代）。冻结版本不可变，
+// 拒绝改写（不更新任何行），以保护已发布快照的不可变性。
 func (s *Store) SupersedeVersion(id string) error {
 	res, err := s.DB.Exec(
-		`UPDATE mapping_versions SET status=? WHERE id=?`, string(model.VersionSuperseded), id,
+		`UPDATE mapping_versions SET status=? WHERE id=? AND status<>?`,
+		string(model.VersionSuperseded), id, string(model.VersionFrozen),
 	)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return model.ErrNotFound
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		// 区分"不存在"与"已冻结"：先确认版本是否存在。
+		if _, err := s.GetVersion(id); err != nil {
+			return err
+		}
+		return model.ErrVersionFrozen
 	}
 	return nil
 }
