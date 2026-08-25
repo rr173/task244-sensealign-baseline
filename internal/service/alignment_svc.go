@@ -71,7 +71,9 @@ func (svc *Service) GenerateCandidates(entryA, entryB string) ([]model.Candidate
 }
 
 // DecideAlignment 对一条义项配对做出裁决（确认/部分重合/否决）。
-// 若纳入某映射版本且该版本已冻结，则拒绝写入（ErrFrozenWrite）。
+// 若纳入某映射版本，要求版本与对齐同属一个批次（范围校验），且该版本未冻结，
+// 否则拒绝写入并返回 ErrCrossBatch / ErrFrozenWrite。校验在任何写入之前完成，
+// 失败时两个批次的状态都不受影响。
 func (svc *Service) DecideAlignment(sourceID, targetID string, relation model.AlignRelation, reason, versionID string) (*model.Alignment, error) {
 	if sourceID == targetID {
 		return nil, model.ErrSelfAlign
@@ -102,6 +104,12 @@ func (svc *Service) DecideAlignment(sourceID, targetID string, relation model.Al
 		v, err := svc.Store.GetVersion(versionID)
 		if err != nil {
 			return nil, err
+		}
+		// 范围校验：纳入的对齐与其目标版本必须同属一个批次，
+		// 否则版本内容与对齐关系会跨批次串接。校验在任何写入之前完成，
+		// 失败时两个批次的状态都不受影响。
+		if v.BatchID != sourceEntry.BatchID {
+			return nil, model.ErrCrossBatch
 		}
 		if v.Status == model.VersionFrozen {
 			return nil, model.ErrFrozenWrite

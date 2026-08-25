@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -163,5 +164,102 @@ func TestRunSelfCheckTemp(t *testing.T) {
 	}
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Fatalf("selfcheck db not persisted: %v", err)
+	}
+}
+
+// TestDecideAlignmentRejectsCrossBatchVersion 验证：把一个批次的义项裁决
+// 绑定到另一个批次的映射版本时被范围校验拦截（返回 ErrCrossBatch），
+// 且失败时两个批次的状态都不改变，也不产生串批的对齐写入。
+func TestDecideAlignmentRejectsCrossBatchVersion(t *testing.T) {
+	svc, cleanup := newTestService(t)
+	defer cleanup()
+
+	// 批次 A：承载被裁决的义项。
+	bA, err := svc.CreateBatch("A", "batch A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetBatchStatus(bA.ID, model.BatchAligning); err != nil {
+		t.Fatal(err)
+	}
+	enA, err := svc.AddEntry(bA.ID, "en", "bank", "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zhA, err := svc.AddEntry(bA.ID, "zh", "银行", "对应")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sA1, err := svc.AddSense(enA.ID, "financial institution", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sA2, err := svc.AddSense(zhA.ID, "金融机构", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.GenerateCandidates(enA.ID, zhA.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 批次 B：拥有一个草稿映射版本。
+	bB, err := svc.CreateBatch("B", "batch B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetBatchStatus(bB.ID, model.BatchAligning); err != nil {
+		t.Fatal(err)
+	}
+	vB, err := svc.CreateVersion(bB.ID, "vB")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 试图把批次 A 的对齐裁决绑定到批次 B 的版本——必须被拒绝。
+	_, err = svc.DecideAlignment(sA1.ID, sA2.ID, model.AlignConfirmed, "cross", vB.ID)
+	if !errors.Is(err, model.ErrCrossBatch) {
+		t.Fatalf("expected ErrCrossBatch, got %v", err)
+	}
+
+	// 失败不应改动两个批次的状态。
+	bA2, err := svc.GetBatch(bA.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bA2.Status != model.BatchAligning {
+		t.Fatalf("batch A status changed to %s", bA2.Status)
+	}
+	bB2, err := svc.GetBatch(bB.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bB2.Status != model.BatchAligning {
+		t.Fatalf("batch B status changed to %s", bB2.Status)
+	}
+
+	// 失败不应把版本写入任何对齐行——避免串批。
+	alignsA, err := svc.ListAlignments(bA.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range alignsA {
+		if a.VersionID == vB.ID {
+			t.Fatalf("cross-batch version id leaked into batch A alignment: %+v", a)
+		}
+	}
+	alignsB, err := svc.ListAlignments(bB.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(alignsB) != 0 {
+		t.Fatalf("batch B unexpectedly gained alignments: %+v", alignsB)
+	}
+	// 版本仍为草稿，未被改写。
+	vB2, err := svc.GetVersion(vB.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vB2.Status != model.VersionDraft {
+		t.Fatalf("version B status changed to %s", vB2.Status)
 	}
 }
