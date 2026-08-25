@@ -29,17 +29,36 @@ func (s *Server) Routes() *http.ServeMux {
 
 	mux.HandleFunc("/api/batches", s.handleBatches)
 	mux.HandleFunc("/api/batches/", s.handleBatchSub)
+	// Register concrete subresource patterns as well as the compatibility
+	// prefix handler above. ServeMux chooses the longest matching pattern.
+	mux.HandleFunc("/api/batches/{id}", s.handleBatchSub)
+	mux.HandleFunc("/api/batches/{id}/entries", s.handleBatchSub)
+	mux.HandleFunc("/api/batches/{id}/stats", s.handleBatchSub)
+	mux.HandleFunc("/api/batches/{id}/alignments", s.handleBatchSub)
+	mux.HandleFunc("/api/batches/{id}/versions", s.handleBatchSub)
 
 	mux.HandleFunc("/api/entries/", s.handleEntrySub)
+	mux.HandleFunc("/api/entries/{id}", s.handleEntrySub)
+	mux.HandleFunc("/api/entries/{id}/senses", s.handleEntrySub)
 
 	mux.HandleFunc("/api/senses/", s.handleSenseSub)
+	mux.HandleFunc("/api/senses/{id}", s.handleSenseSub)
+	mux.HandleFunc("/api/senses/{id}/registers", s.handleSenseSub)
+	mux.HandleFunc("/api/senses/{id}/split", s.handleSenseSub)
+	mux.HandleFunc("/api/senses/{id}/examples", s.handleSenseSub)
+	mux.HandleFunc("/api/senses/{id}/counterexamples", s.handleSenseSub)
 
 	mux.HandleFunc("/api/align/candidates", s.handleAlignCandidates)
 	mux.HandleFunc("/api/alignments/decide", s.handleAlignDecide)
 	mux.HandleFunc("/api/alignments/", s.handleAlignmentSub)
+	mux.HandleFunc("/api/alignments/{id}", s.handleAlignmentSub)
 
 	mux.HandleFunc("/api/versions", s.handleVersionsCreate)
 	mux.HandleFunc("/api/versions/", s.handleVersionSub)
+	mux.HandleFunc("/api/versions/{id}", s.handleVersionSub)
+	mux.HandleFunc("/api/versions/{id}/freeze", s.handleVersionSub)
+	mux.HandleFunc("/api/versions/{id}/share", s.handleVersionSub)
+	mux.HandleFunc("/api/versions/{id}/supersede", s.handleVersionSub)
 
 	mux.HandleFunc("/", s.handleRoot)
 	return mux
