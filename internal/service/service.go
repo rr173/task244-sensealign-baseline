@@ -33,17 +33,23 @@ func (svc *Service) ListBatches() ([]*model.Batch, error) {
 	return svc.Store.ListBatches()
 }
 
-// SetBatchStatus 更新批次状态（封存为终态，后续写入由各写操作拦截）。
+// SetBatchStatus 更新批次状态。只允许按业务顺序前进（organizing → aligning
+// → published → sealed）；重复当前状态视为幂等成功。非法推进或封存后的任何
+// 变更均被拒绝，原状态保持不变。
 func (svc *Service) SetBatchStatus(id string, status model.BatchStatus) error {
 	if !model.ValidBatchStatus(string(status)) {
-		return model.ErrEmptyDefinition
+		return model.ErrBadRelation
 	}
 	b, err := svc.Store.GetBatch(id)
 	if err != nil {
 		return err
 	}
-	if b.Status == model.BatchSealed && status != model.BatchSealed {
-		return model.ErrBatchSealed
+	if !model.ValidBatchTransition(b.Status, status) {
+		// 封存为终态，给出更具体的错误，便于上层映射 409。
+		if b.Status == model.BatchSealed {
+			return model.ErrBatchSealed
+		}
+		return model.ErrInvalidBatchTransition
 	}
 	return svc.Store.SetBatchStatus(id, status)
 }

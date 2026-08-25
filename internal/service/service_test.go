@@ -165,3 +165,84 @@ func TestRunSelfCheckTemp(t *testing.T) {
 		t.Fatalf("selfcheck db not persisted: %v", err)
 	}
 }
+
+// TestBatchStatusTransitionOrder 状态机只允许按业务顺序前进；
+// 非法推进被拒绝且原状态不变（整理中直接跳到已发布或封存）。
+func TestBatchStatusTransitionOrder(t *testing.T) {
+	svc, cleanup := newTestService(t)
+	defer cleanup()
+
+	b, err := svc.CreateBatch("t", "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 整理中直接跳到已发布 / 封存：非法，状态保持整理中。
+	if err := svc.SetBatchStatus(b.ID, model.BatchPublished); err != model.ErrInvalidBatchTransition {
+		t.Fatalf("organizing→published: want ErrInvalidBatchTransition, got %v", err)
+	}
+	if err := svc.SetBatchStatus(b.ID, model.BatchSealed); err != model.ErrInvalidBatchTransition {
+		t.Fatalf("organizing→sealed: want ErrInvalidBatchTransition, got %v", err)
+	}
+	got, err := svc.GetBatch(b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.BatchOrganizing {
+		t.Fatalf("status mutated after illegal advance: %s", got.Status)
+	}
+
+	// 正序推进到已发布后再跳回待对齐：倒退非法。
+	if err := svc.SetBatchStatus(b.ID, model.BatchAligning); err != nil {
+		t.Fatalf("organizing→aligning: %v", err)
+	}
+	if err := svc.SetBatchStatus(b.ID, model.BatchPublished); err != nil {
+		t.Fatalf("aligning→published: %v", err)
+	}
+	if err := svc.SetBatchStatus(b.ID, model.BatchAligning); err != model.ErrInvalidBatchTransition {
+		t.Fatalf("published→aligning: want ErrInvalidBatchTransition, got %v", err)
+	}
+	got, err = svc.GetBatch(b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.BatchPublished {
+		t.Fatalf("status mutated after illegal regress: %s", got.Status)
+	}
+
+	// 封存为终态：后续任何推进被拒绝。
+	if err := svc.SetBatchStatus(b.ID, model.BatchSealed); err != nil {
+		t.Fatalf("published→sealed: %v", err)
+	}
+	if err := svc.SetBatchStatus(b.ID, model.BatchOrganizing); err != model.ErrBatchSealed {
+		t.Fatalf("sealed→organizing: want ErrBatchSealed, got %v", err)
+	}
+	got, err = svc.GetBatch(b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.BatchSealed {
+		t.Fatalf("status mutated after sealing: %s", got.Status)
+	}
+
+	// 非法取值被拒绝。
+	if err := svc.SetBatchStatus(b.ID, model.BatchStatus("nope")); err == nil {
+		t.Fatalf("invalid status value accepted")
+	}
+}
+
+func TestBatchStatusIdempotent(t *testing.T) {
+	svc, cleanup := newTestService(t)
+	defer cleanup()
+	b, _ := svc.CreateBatch("t", "d")
+	// 重复当前状态视为幂等成功。
+	if err := svc.SetBatchStatus(b.ID, model.BatchOrganizing); err != nil {
+		t.Fatalf("repeating organizing: %v", err)
+	}
+	if err := svc.SetBatchStatus(b.ID, model.BatchAligning); err != nil {
+		t.Fatalf("organizing→aligning: %v", err)
+	}
+	if err := svc.SetBatchStatus(b.ID, model.BatchAligning); err != nil {
+		t.Fatalf("repeating aligning: %v", err)
+	}
+}
