@@ -67,6 +67,7 @@ type Snapshot struct {
 }
 
 // BuildSnapshot 采集批次内已裁决（确认/部分重合）对齐为快照 JSON。
+// 任一侧义项仍登记有反例的确认对齐会被剔除，以保证复核结果不把已记录的反例当作不存在。
 func (svc *Service) BuildSnapshot(batchID string) (string, error) {
 	all, err := svc.Store.ListAlignmentsForBatch(batchID)
 	if err != nil {
@@ -74,9 +75,17 @@ func (svc *Service) BuildSnapshot(batchID string) (string, error) {
 	}
 	var kept []model.Alignment
 	for _, a := range all {
-		if a.Relation == model.AlignConfirmed || a.Relation == model.AlignPartial {
-			kept = append(kept, *a)
+		if a.Relation != model.AlignConfirmed && a.Relation != model.AlignPartial {
+			continue
 		}
+		if a.Relation == model.AlignConfirmed {
+			if blocked, err := svc.alignmentBlockedByCounterexample(a); err != nil {
+				return "", err
+			} else if blocked {
+				continue
+			}
+		}
+		kept = append(kept, *a)
 	}
 	snap := Snapshot{
 		BatchID:     batchID,
@@ -88,4 +97,20 @@ func (svc *Service) BuildSnapshot(batchID string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// alignmentBlockedByCounterexample 报告该对齐任一侧义项是否登记有反例。
+func (svc *Service) alignmentBlockedByCounterexample(a *model.Alignment) (bool, error) {
+	srcN, err := svc.Store.CountCounterexamples(a.SourceSenseID)
+	if err != nil {
+		return false, err
+	}
+	if srcN > 0 {
+		return true, nil
+	}
+	tgtN, err := svc.Store.CountCounterexamples(a.TargetSenseID)
+	if err != nil {
+		return false, err
+	}
+	return tgtN > 0, nil
 }

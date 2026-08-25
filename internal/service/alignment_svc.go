@@ -72,6 +72,8 @@ func (svc *Service) GenerateCandidates(entryA, entryB string) ([]model.Candidate
 
 // DecideAlignment 对一条义项配对做出裁决（确认/部分重合/否决）。
 // 若纳入某映射版本且该版本已冻结，则拒绝写入（ErrFrozenWrite）。
+// 若将关系确认（confirmed）而任一侧义项已登记反例，则拒绝确认
+// （ErrCounterexampleConflict）——反例证明该配对不应合并，须先否决或撤销反例。
 func (svc *Service) DecideAlignment(sourceID, targetID string, relation model.AlignRelation, reason, versionID string) (*model.Alignment, error) {
 	if sourceID == targetID {
 		return nil, model.ErrSelfAlign
@@ -86,6 +88,11 @@ func (svc *Service) DecideAlignment(sourceID, targetID string, relation model.Al
 	target, err := svc.Store.GetSense(targetID)
 	if err != nil {
 		return nil, model.ErrUnknownSense
+	}
+	if relation == model.AlignConfirmed {
+		if err := svc.ensureNoCounterexample(sourceID, targetID); err != nil {
+			return nil, err
+		}
 	}
 	sourceEntry, err := svc.Store.GetEntry(source.EntryID)
 	if err != nil {
@@ -131,6 +138,19 @@ func (svc *Service) DecideAlignment(sourceID, targetID string, relation model.Al
 		return nil, err
 	}
 	return existing, nil
+}
+
+// ensureNoCounterexample 校验两端义项均无已登记反例，任一侧存在反例即阻断了
+// 该配对的确认合并。复核阶段凭此保证：带反例的对应关系不会被确认发布。
+func (svc *Service) ensureNoCounterexample(sourceID, targetID string) error {
+	blocked, err := svc.alignmentBlockedByCounterexample(&model.Alignment{SourceSenseID: sourceID, TargetSenseID: targetID})
+	if err != nil {
+		return err
+	}
+	if blocked {
+		return model.ErrCounterexampleConflict
+	}
+	return nil
 }
 
 // GetAlignment 读取对齐关系。
