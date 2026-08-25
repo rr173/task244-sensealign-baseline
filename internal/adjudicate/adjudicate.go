@@ -23,7 +23,12 @@ func SplitSense(s *store.Store, senseID string, targetSenseIDs []string) ([]*mod
 	if orig.Status == model.SenseSplit {
 		return nil, model.ErrSenseSplit
 	}
+	seenTargets := make(map[string]struct{}, len(targetSenseIDs))
 	for _, t := range targetSenseIDs {
+		if _, exists := seenTargets[t]; exists {
+			return nil, model.ErrDuplicateTarget
+		}
+		seenTargets[t] = struct{}{}
 		if t == senseID {
 			return nil, model.ErrSelfAlign
 		}

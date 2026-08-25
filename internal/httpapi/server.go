@@ -80,7 +80,10 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, model.ErrBatchSealed),
 		errors.Is(err, model.ErrFrozenWrite),
 		errors.Is(err, model.ErrSenseSplit),
-		errors.Is(err, model.ErrVersionFrozen):
+		errors.Is(err, model.ErrVersionFrozen),
+		errors.Is(err, model.ErrInvalidBatchTransition),
+		errors.Is(err, model.ErrCounterexampleConflict),
+		errors.Is(err, model.ErrDuplicateTarget):
 		code = http.StatusConflict
 	case errors.Is(err, model.ErrInvalidLang),
 		errors.Is(err, model.ErrEmptyDefinition),
@@ -90,7 +93,8 @@ func writeError(w http.ResponseWriter, err error) {
 		errors.Is(err, model.ErrDuplicate),
 		errors.Is(err, model.ErrUnknownSense),
 		errors.Is(err, model.ErrUnknownEntry),
-		errors.Is(err, model.ErrUnknownBatch):
+		errors.Is(err, model.ErrUnknownBatch),
+		errors.Is(err, model.ErrCrossBatch):
 		code = http.StatusBadRequest
 	}
 	writeJSON(w, code, map[string]any{"error": err.Error()})

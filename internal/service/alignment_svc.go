@@ -14,11 +14,16 @@ func (svc *Service) GenerateCandidates(entryA, entryB string) ([]model.Candidate
 	if entryA == entryB {
 		return nil, model.ErrSameEntry
 	}
-	if _, err := svc.Store.GetEntry(entryA); err != nil {
+	srcEntry, err := svc.Store.GetEntry(entryA)
+	if err != nil {
 		return nil, model.ErrUnknownEntry
 	}
-	if _, err := svc.Store.GetEntry(entryB); err != nil {
+	tgtEntry, err := svc.Store.GetEntry(entryB)
+	if err != nil {
 		return nil, model.ErrUnknownEntry
+	}
+	if srcEntry.BatchID != tgtEntry.BatchID {
+		return nil, model.ErrCrossBatch
 	}
 	cands, err := matcher.GenerateCandidates(svc.Store, entryA, entryB)
 	if err != nil {
@@ -26,17 +31,39 @@ func (svc *Service) GenerateCandidates(entryA, entryB string) ([]model.Candidate
 	}
 	for _, c := range cands {
 		a := &model.Alignment{
-			ID:              store.NewID("a"),
-			SourceSenseID:   c.SourceSenseID,
-			TargetSenseID:   c.TargetSenseID,
-			Relation:        model.AlignCandidate,
-			CovScore:        c.CovScore,
-			Hypernym:        c.Hypernym,
-			Hyponym:         c.Hyponym,
+			ID:               store.NewID("a"),
+			SourceSenseID:    c.SourceSenseID,
+			TargetSenseID:    c.TargetSenseID,
+			Relation:         model.AlignCandidate,
+			CovScore:         c.CovScore,
+			Hypernym:         c.Hypernym,
+			Hyponym:          c.Hyponym,
 			RegisterConflict: c.RegisterConflict,
-			CreatedAt:       time.Now().UTC(),
+			CreatedAt:        time.Now().UTC(),
 		}
 		if err := svc.Store.SaveAlignment(a); err != nil {
+			return nil, err
+		}
+	}
+	conflicts := matcher.DetectOneToMany(cands, 0.5)
+	seen := make(map[string]struct{})
+	for _, c := range cands {
+		seen[c.SourceSenseID] = struct{}{}
+		seen[c.TargetSenseID] = struct{}{}
+	}
+	for senseID := range seen {
+		sn, err := svc.Store.GetSense(senseID)
+		if err != nil {
+			return nil, err
+		}
+		if sn.Status == model.SenseSplit {
+			continue
+		}
+		status := model.SenseAlignable
+		if _, ok := conflicts[senseID]; ok {
+			status = model.SenseConflict
+		}
+		if err := svc.Store.SetSenseStatus(senseID, status); err != nil {
 			return nil, err
 		}
 	}
@@ -52,11 +79,24 @@ func (svc *Service) DecideAlignment(sourceID, targetID string, relation model.Al
 	if !model.ValidAlignRelation(string(relation)) {
 		return nil, model.ErrBadRelation
 	}
-	if _, err := svc.Store.GetSense(sourceID); err != nil {
+	source, err := svc.Store.GetSense(sourceID)
+	if err != nil {
 		return nil, model.ErrUnknownSense
 	}
-	if _, err := svc.Store.GetSense(targetID); err != nil {
+	target, err := svc.Store.GetSense(targetID)
+	if err != nil {
 		return nil, model.ErrUnknownSense
+	}
+	sourceEntry, err := svc.Store.GetEntry(source.EntryID)
+	if err != nil {
+		return nil, err
+	}
+	targetEntry, err := svc.Store.GetEntry(target.EntryID)
+	if err != nil {
+		return nil, err
+	}
+	if sourceEntry.BatchID != targetEntry.BatchID {
+		return nil, model.ErrCrossBatch
 	}
 	if versionID != "" {
 		v, err := svc.Store.GetVersion(versionID)
@@ -65,6 +105,22 @@ func (svc *Service) DecideAlignment(sourceID, targetID string, relation model.Al
 		}
 		if v.Status == model.VersionFrozen {
 			return nil, model.ErrFrozenWrite
+		}
+		if v.BatchID != sourceEntry.BatchID {
+			return nil, model.ErrCrossBatch
+		}
+	}
+	if relation == model.AlignConfirmed {
+		sourceCounterexamples, err := svc.Store.CountCounterexamples(sourceID)
+		if err != nil {
+			return nil, err
+		}
+		targetCounterexamples, err := svc.Store.CountCounterexamples(targetID)
+		if err != nil {
+			return nil, err
+		}
+		if sourceCounterexamples > 0 || targetCounterexamples > 0 {
+			return nil, model.ErrCounterexampleConflict
 		}
 	}
 	existing, err := svc.Store.GetAlignmentPair(sourceID, targetID)

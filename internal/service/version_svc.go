@@ -49,14 +49,21 @@ func (svc *Service) ShareVersion(versionID string) error {
 
 // SupersedeVersion 将版本标记为替代。
 func (svc *Service) SupersedeVersion(versionID string) error {
+	v, err := svc.Store.GetVersion(versionID)
+	if err != nil {
+		return err
+	}
+	if v.Status == model.VersionFrozen {
+		return model.ErrVersionFrozen
+	}
 	return svc.Store.SupersedeVersion(versionID)
 }
 
 // Snapshot 映射版本快照载荷。
 type Snapshot struct {
-	BatchID   string            `json:"batch_id"`
-	GeneratedAt string          `json:"generated_at"`
-	Alignments []model.Alignment `json:"alignments"`
+	BatchID     string            `json:"batch_id"`
+	GeneratedAt string            `json:"generated_at"`
+	Alignments  []model.Alignment `json:"alignments"`
 }
 
 // BuildSnapshot 采集批次内已裁决（确认/部分重合）对齐为快照 JSON。
@@ -72,9 +79,9 @@ func (svc *Service) BuildSnapshot(batchID string) (string, error) {
 		}
 	}
 	snap := Snapshot{
-		BatchID:    batchID,
+		BatchID:     batchID,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
-		Alignments: kept,
+		Alignments:  kept,
 	}
 	b, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {

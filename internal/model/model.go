@@ -64,12 +64,12 @@ type Entry struct {
 
 // Sense 义项：词条的一个含义，是跨语言对齐的最小裁决单元。
 type Sense struct {
-	ID          string
-	EntryID     string
-	Definition  string
-	Status      SenseStatus
+	ID           string
+	EntryID      string
+	Definition   string
+	Status       SenseStatus
 	RegisterTags []string // 语域标签：formal/informal/slang/technical/literary/colloquial/archaic/dialect
-	CreatedAt   time.Time
+	CreatedAt    time.Time
 }
 
 // Example 例句：义项的用法证据，可带翻译与语域。
@@ -85,18 +85,18 @@ type Example struct {
 
 // Alignment 对齐关系：一条跨语言义项配对及其裁决结论。
 type Alignment struct {
-	ID              string
-	SourceSenseID   string
-	TargetSenseID   string
-	Relation        AlignRelation
-	CovScore        float64
-	Hypernym        bool
-	Hyponym         bool
+	ID               string
+	SourceSenseID    string
+	TargetSenseID    string
+	Relation         AlignRelation
+	CovScore         float64
+	Hypernym         bool
+	Hyponym          bool
 	RegisterConflict bool
-	Reason          string
-	VersionID       string // 空表示未纳入任何版本
-	CreatedAt       time.Time
-	DecidedAt       time.Time
+	Reason           string
+	VersionID        string // 空表示未纳入任何版本
+	CreatedAt        time.Time
+	DecidedAt        time.Time
 }
 
 // Counterexample 反例：证明某义项配对不应合并的证据。
@@ -136,6 +136,24 @@ func ValidBatchStatus(s string) bool {
 		return true
 	}
 	return false
+}
+
+// ValidBatchTransition reports whether a batch may advance to the target
+// state. Repeating the current state is idempotent and therefore allowed.
+func ValidBatchTransition(from, to BatchStatus) bool {
+	if from == to {
+		return true
+	}
+	switch from {
+	case BatchOrganizing:
+		return to == BatchAligning
+	case BatchAligning:
+		return to == BatchPublished
+	case BatchPublished:
+		return to == BatchSealed
+	default:
+		return false
+	}
 }
 
 // ValidSenseStatus 校验义项状态取值。

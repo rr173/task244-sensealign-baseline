@@ -45,6 +45,9 @@ func (svc *Service) SetBatchStatus(id string, status model.BatchStatus) error {
 	if b.Status == model.BatchSealed && status != model.BatchSealed {
 		return model.ErrBatchSealed
 	}
+	if !model.ValidBatchTransition(b.Status, status) {
+		return model.ErrInvalidBatchTransition
+	}
 	return svc.Store.SetBatchStatus(id, status)
 }
 
@@ -72,8 +75,12 @@ func (svc *Service) ListEntries(batchID string) ([]*model.Entry, error) {
 
 // AddSense 在词条下新增义项，语域标签按受控词表规范化。
 func (svc *Service) AddSense(entryID, definition string, registers []string) (*model.Sense, error) {
-	if _, err := svc.Store.GetEntry(entryID); err != nil {
+	entry, err := svc.Store.GetEntry(entryID)
+	if err != nil {
 		return nil, model.ErrUnknownEntry
+	}
+	if err := svc.ensureBatchWritable(entry.BatchID); err != nil {
+		return nil, err
 	}
 	tags := evidence.NormalizeRegisters(registers)
 	return svc.Store.CreateSense(entryID, definition, tags)
@@ -91,16 +98,35 @@ func (svc *Service) ListSenses(entryID string) ([]*model.Sense, error) {
 
 // SetRegisters 覆盖义项语域标签（规范化）。
 func (svc *Service) SetRegisters(senseID string, registers []string) error {
-	if _, err := svc.Store.GetSense(senseID); err != nil {
+	sn, err := svc.Store.GetSense(senseID)
+	if err != nil {
 		return err
 	}
-	return svc.Store.SetSenseRegisters(senseID, evidence.NormalizeRegisters(registers))
+	entry, err := svc.Store.GetEntry(sn.EntryID)
+	if err != nil {
+		return err
+	}
+	if err := svc.ensureBatchWritable(entry.BatchID); err != nil {
+		return err
+	}
+	if err := svc.Store.SetSenseRegisters(senseID, evidence.NormalizeRegisters(registers)); err != nil {
+		return err
+	}
+	return svc.refreshAlignmentEvidence(senseID)
 }
 
 // AddExample 为义项新增例句。
 func (svc *Service) AddExample(senseID, text, lang, trans, register string) (*model.Example, error) {
-	if _, err := svc.Store.GetSense(senseID); err != nil {
+	sn, err := svc.Store.GetSense(senseID)
+	if err != nil {
 		return nil, model.ErrUnknownSense
+	}
+	entry, err := svc.Store.GetEntry(sn.EntryID)
+	if err != nil {
+		return nil, err
+	}
+	if err := svc.ensureBatchWritable(entry.BatchID); err != nil {
+		return nil, err
 	}
 	return svc.Store.CreateExample(senseID, text, lang, trans, register)
 }
@@ -112,10 +138,51 @@ func (svc *Service) ListExamples(senseID string) ([]*model.Example, error) {
 
 // AddCounterexample 为义项新增反例证据。
 func (svc *Service) AddCounterexample(senseID, text, note string) (*model.Counterexample, error) {
-	if _, err := svc.Store.GetSense(senseID); err != nil {
+	sn, err := svc.Store.GetSense(senseID)
+	if err != nil {
 		return nil, model.ErrUnknownSense
 	}
+	entry, err := svc.Store.GetEntry(sn.EntryID)
+	if err != nil {
+		return nil, err
+	}
+	if err := svc.ensureBatchWritable(entry.BatchID); err != nil {
+		return nil, err
+	}
 	return svc.Store.CreateCounterexample(senseID, text, note)
+}
+
+func (svc *Service) ensureBatchWritable(batchID string) error {
+	b, err := svc.Store.GetBatch(batchID)
+	if err != nil {
+		return err
+	}
+	if b.Status == model.BatchSealed {
+		return model.ErrBatchSealed
+	}
+	return nil
+}
+
+func (svc *Service) refreshAlignmentEvidence(senseID string) error {
+	alignments, err := svc.Store.ListAlignmentsBySense(senseID)
+	if err != nil {
+		return err
+	}
+	for _, a := range alignments {
+		src, err := svc.Store.GetSense(a.SourceSenseID)
+		if err != nil {
+			return err
+		}
+		tgt, err := svc.Store.GetSense(a.TargetSenseID)
+		if err != nil {
+			return err
+		}
+		_, a.RegisterConflict = evidence.RegisterCompatibility(src.RegisterTags, tgt.RegisterTags)
+		if err := svc.Store.SaveAlignment(a); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ListCounterexamples 列出义项反例。

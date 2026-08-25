@@ -1,6 +1,7 @@
 package adjudicate
 
 import (
+	"task244-sensealign/internal/model"
 	"task244-sensealign/internal/store"
 )
 
@@ -27,6 +28,9 @@ func BuildConflictReport(s *store.Store, batchID string) (*ConflictReport, error
 	}
 	coverBySrc := make(map[string][]string)
 	for _, a := range aligns {
+		if a.Relation == model.AlignRejected {
+			continue
+		}
 		if a.CovScore >= 0.5 {
 			coverBySrc[a.SourceSenseID] = append(coverBySrc[a.SourceSenseID], a.TargetSenseID)
 		}

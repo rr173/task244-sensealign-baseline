@@ -59,6 +59,15 @@ func (s *Store) ListAlignmentsBySource(sourceID string) ([]*model.Alignment, err
 	)
 }
 
+// ListAlignmentsBySense 列出义项作为任一侧参与的全部对齐。
+func (s *Store) ListAlignmentsBySense(senseID string) ([]*model.Alignment, error) {
+	return s.listAlignments(
+		`SELECT id, source_sense_id, target_sense_id, relation, coverage_score,
+			hypernym, hyponym, register_conflict, reason, version_id, created_at, decided_at
+			FROM alignments WHERE source_sense_id=? OR target_sense_id=? ORDER BY created_at`, senseID, senseID,
+	)
+}
+
 // ListAlignmentsByVersion 列出某映射版本纳入的全部对齐。
 func (s *Store) ListAlignmentsByVersion(versionID string) ([]*model.Alignment, error) {
 	return s.listAlignments(
@@ -102,8 +111,8 @@ func scanAlignment(scanner interface {
 }) (*model.Alignment, error) {
 	var (
 		id, src, tgt, rel, reason, vid, ca, da string
-		cov                                     float64
-		hyper, hypo, regc                        int
+		cov                                    float64
+		hyper, hypo, regc                      int
 	)
 	if err := scanner.Scan(&id, &src, &tgt, &rel, &cov, &hyper, &hypo, &regc, &reason, &vid, &ca, &da); err != nil {
 		if err == sql.ErrNoRows {
@@ -112,18 +121,18 @@ func scanAlignment(scanner interface {
 		return nil, err
 	}
 	a := &model.Alignment{
-		ID:              id,
-		SourceSenseID:   src,
-		TargetSenseID:   tgt,
-		Relation:        model.AlignRelation(rel),
-		CovScore:        cov,
-		Hypernym:        hyper == 1,
-		Hyponym:         hypo == 1,
+		ID:               id,
+		SourceSenseID:    src,
+		TargetSenseID:    tgt,
+		Relation:         model.AlignRelation(rel),
+		CovScore:         cov,
+		Hypernym:         hyper == 1,
+		Hyponym:          hypo == 1,
 		RegisterConflict: regc == 1,
-		Reason:          reason,
-		VersionID:       vid,
-		CreatedAt:       ParseTime(ca),
-		DecidedAt:       ParseTime(da),
+		Reason:           reason,
+		VersionID:        vid,
+		CreatedAt:        ParseTime(ca),
+		DecidedAt:        ParseTime(da),
 	}
 	return a, nil
 }
